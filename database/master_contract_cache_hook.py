@@ -3,6 +3,7 @@ Master Contract Cache Hook
 Automatically loads symbols into memory cache after successful master contract download
 """
 
+import sys
 import time
 
 from extensions import socketio
@@ -115,6 +116,15 @@ def hook_into_master_contract_download(broker: str):
         except Exception as strategy_error:
             logger.exception(f"Error restoring Python strategies: {strategy_error}")
 
+        # The option-chain recorder needs the new symbol list to pick its
+        # contracts. Off unless CHAIN_RECORDER_ENABLED is set.
+        try:
+            from services.chain_recorder.recorder import start_for_admin_user
+
+            start_for_admin_user()
+        except Exception as recorder_error:
+            logger.exception(f"Error starting the chain recorder: {recorder_error}")
+
     except Exception as e:
         logger.exception(f"Error in master contract cache hook: {e}")
 
@@ -133,6 +143,12 @@ def clear_cache_on_logout():
 
         # Clear the cache
         clear_cache()
+
+        # The recorder's contracts came from this symbol list; the next login
+        # loads a fresh one and starts it again.
+        recorder = sys.modules.get("services.chain_recorder.recorder")
+        if recorder is not None:
+            recorder.stop_chain_recorder()
 
         logger.info(f"Cache cleared. Removed {symbols_cleared} symbols from memory")
 

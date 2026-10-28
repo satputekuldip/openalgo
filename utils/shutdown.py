@@ -144,6 +144,13 @@ def _stop_strategy_module() -> None:
         module.stop_strategy_module()
 
 
+def _stop_chain_recorder() -> None:
+    """Stop the option-chain recorder and its snapshot thread."""
+    module = _imported("services.chain_recorder.recorder")
+    if module is not None:
+        module.stop_chain_recorder()
+
+
 def _stop_flow_scheduler() -> None:
     """Stop the Flow workflow scheduler."""
     module = _imported("services.flow_scheduler_service")
@@ -440,6 +447,7 @@ def shutdown_runtime() -> None:
         _stop_flow_scheduler,
         _stop_historify_scheduler,
         _stop_historify_downloads,
+        _stop_chain_recorder,
         _stop_chartink_scheduler,
         _stop_python_strategy_scheduler,
         _stop_squareoff_scheduler,

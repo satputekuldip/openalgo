@@ -1,0 +1,8 @@
+{
+  "_comment": "Go/no-go limits for Phase 0 of docs/plans/2026-10-28-clickhouse-market-data-plan.md. Fixed before the benchmark runs: change them only before a run, never after reading its results. ClickHouse is built only if DuckDB breaks at least one.",
+  "reader_p99_ms_during_writes": 200,
+  "reader_max_ms_during_writes": 1000,
+  "minute_bar_scan_seconds": 5,
+  "iv_smile_seconds": 3,
+  "disk_gb_per_year_of_recording": 50
+}
