@@ -170,6 +170,7 @@ dependencies = [
   "litellm==1.104.0",
   "agno==3.0.5",
   "ddgs>=9.16.0",
+  "psycopg[binary]>=3.2",
 ]
 
 [tool.uv]

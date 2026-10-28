@@ -4,7 +4,6 @@ import os
 from datetime import datetime
 
 import pytz
-
 from dotenv import load_dotenv
 from sqlalchemy import (
     DECIMAL,
@@ -37,6 +36,7 @@ def ist_now() -> datetime:
     return datetime.now(IST).replace(tzinfo=None)
 
 
+from database.engine_factory import create_db_engine
 from utils.logging import get_logger
 
 # Initialize logger
@@ -57,7 +57,7 @@ if SANDBOX_DATABASE_URL and "sqlite" in SANDBOX_DATABASE_URL:
     )
 else:
     # For other databases like PostgreSQL, use connection pooling
-    engine = create_engine(SANDBOX_DATABASE_URL, pool_size=20, max_overflow=40, pool_timeout=10)
+    engine = create_db_engine(SANDBOX_DATABASE_URL)
 
 db_session = scoped_session(sessionmaker(autocommit=False, autoflush=False, bind=engine))
 Base = declarative_base()
@@ -443,13 +443,27 @@ def init_db():
     init_default_config()
 
 
+def _column_names(conn, table):
+    """Column names of ``table``, or an empty set when it does not exist.
+
+    The inspector reads PRAGMA table_info on SQLite, exactly as this used to
+    do by hand, and the information schema on PostgreSQL.
+    """
+    from sqlalchemy import inspect
+
+    inspector = inspect(conn)
+    if not inspector.has_table(table):
+        return set()
+    return {column["name"] for column in inspector.get_columns(table)}
+
+
 def _migrate_add_order_gtt_leg_id():
     """Add sandbox_orders.gtt_leg_id to databases created without it."""
     from sqlalchemy import text
 
     try:
         with engine.connect() as conn:
-            existing = {row[1] for row in conn.execute(text("PRAGMA table_info(sandbox_orders)"))}
+            existing = _column_names(conn, "sandbox_orders")
             if not existing or "gtt_leg_id" in existing:
                 return
             conn.execute(text("ALTER TABLE sandbox_orders ADD COLUMN gtt_leg_id INTEGER"))
@@ -481,9 +495,7 @@ def _migrate_add_gtt_trigger_direction():
 
     try:
         with engine.connect() as conn:
-            existing = {
-                row[1] for row in conn.execute(text("PRAGMA table_info(sandbox_gtt_legs)"))
-            }
+            existing = _column_names(conn, "sandbox_gtt_legs")
             if not existing or "trigger_direction" in existing:
                 return
             conn.execute(

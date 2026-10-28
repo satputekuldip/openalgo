@@ -55,6 +55,7 @@ need → drill into the specific file. Don't load everything at once.
 | Topic | Entry point |
 |---|---|
 | First-time contributor setup (devsprint prep) | [devsprint/README.md](devsprint/README.md) |
+| PostgreSQL for development (`docker-compose.dev.yaml`, one schema per database) | [development/postgres.md](development/postgres.md) |
 | System design (frontend, backend, DB, UI) | [design/README.md](design/README.md) |
 | Product requirements — Flow, Python strategies, Strategy module & RMS, Sandbox, Historify, MCP, event bus, websocket proxy | [prd/README.md](prd/README.md) · [prd/PRD.md](prd/PRD.md) |
 | BDD feature specs (Gherkin `.feature`) | [bdd/README.md](bdd/README.md) |

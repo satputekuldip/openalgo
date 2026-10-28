@@ -1,12 +1,14 @@
 import json
 import logging
 import os
-from datetime import datetime, date, timedelta
+from datetime import date, datetime, timedelta
 
 from sqlalchemy import Boolean, Column, Date, DateTime, Integer, String, Text, create_engine, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool
+
+from database.engine_factory import create_db_engine
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +33,7 @@ if DB_PATH and "sqlite" in DB_PATH:
     )
 else:
     # For other databases like PostgreSQL, use connection pooling
-    engine = create_engine(DB_PATH, echo=False, pool_size=50, max_overflow=100, pool_timeout=10)
+    engine = create_db_engine(DB_PATH)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()

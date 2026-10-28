@@ -28,6 +28,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import scoped_session, sessionmaker
 from sqlalchemy.pool import NullPool
 
+from database.engine_factory import create_db_engine
 from utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -60,7 +61,7 @@ if DATABASE_URL and "sqlite" in DATABASE_URL:
         DATABASE_URL, poolclass=NullPool, connect_args={"check_same_thread": False}
     )
 else:
-    engine = create_engine(DATABASE_URL, pool_size=20, max_overflow=40, pool_timeout=10)
+    engine = create_db_engine(DATABASE_URL)
 
 db_session = scoped_session(sessionmaker(autocommit=False, autoflush=False, bind=engine))
 Base = declarative_base()

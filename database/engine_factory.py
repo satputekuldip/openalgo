@@ -27,8 +27,11 @@ implementation in ``database/auth_db.py``.
 """
 
 import os
+import re
+import threading
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
+from sqlalchemy.engine import make_url
 from sqlalchemy.pool import NullPool
 
 
@@ -55,5 +58,66 @@ def create_db_engine(database_url=None):
             connect_args={"check_same_thread": False},
         )
 
-    # Non-SQLite backends (e.g. PostgreSQL): use a real connection pool.
+    if database_url and database_url.startswith(("postgresql", "postgres:")):
+        return _postgres_engine(database_url)
+
+    # Other non-SQLite backends: use a real connection pool.
     return create_engine(database_url, pool_size=50, max_overflow=100, pool_timeout=10)
+
+
+# PostgreSQL: one database, one schema per former SQLite file. A URL selects its
+# schema with a ``schema`` query parameter, which is not a libpq option, so it is
+# removed before connecting and applied as the connection's search_path:
+#
+#     postgresql+psycopg://openalgo:openalgo@127.0.0.1:5433/openalgo?schema=logs
+#
+# About thirty modules build an engine from the same URL. Each used to get its
+# own pool of up to 150 connections, which would exhaust max_connections long
+# before any of them was busy, so engines are shared per URL.
+_PG_POOL_SIZE = 10
+_PG_MAX_OVERFLOW = 30
+_PG_ENGINES = {}
+_PG_ENGINES_LOCK = threading.Lock()
+_SCHEMA_NAME = re.compile(r"^[a-z_][a-z0-9_]*$")
+
+
+def _postgres_engine(database_url):
+    url = make_url(database_url)
+    if url.drivername in ("postgresql", "postgres"):
+        # psycopg 3 is the driver this project ships; psycopg2 is not installed.
+        url = url.set(drivername="postgresql+psycopg")
+
+    schema = url.query.get("schema")
+    if schema is not None and not _SCHEMA_NAME.match(schema):
+        raise ValueError(f"Invalid PostgreSQL schema name in database URL: {schema!r}")
+    url = url.difference_update_query(["schema"])
+
+    key = (url.render_as_string(hide_password=False), schema)
+    with _PG_ENGINES_LOCK:
+        engine = _PG_ENGINES.get(key)
+        if engine is not None:
+            return engine
+
+        engine = create_engine(
+            url,
+            pool_size=_PG_POOL_SIZE,
+            max_overflow=_PG_MAX_OVERFLOW,
+            pool_timeout=10,
+            pool_pre_ping=True,
+        )
+        if schema:
+            _bind_schema(engine, schema)
+        _PG_ENGINES[key] = engine
+        return engine
+
+
+def _bind_schema(engine, schema):
+    """Create ``schema`` if missing and make it every connection's search_path."""
+
+    @event.listens_for(engine, "connect")
+    def _set_search_path(dbapi_connection, connection_record):
+        # The name is validated against _SCHEMA_NAME, so quoting it is enough.
+        with dbapi_connection.cursor() as cursor:
+            cursor.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema}"')
+            cursor.execute(f'SET search_path TO "{schema}"')
+        dbapi_connection.commit()

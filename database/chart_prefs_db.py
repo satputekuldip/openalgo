@@ -9,6 +9,7 @@ from sqlalchemy.orm import scoped_session, sessionmaker
 from sqlalchemy.pool import NullPool
 
 from database.auth_db import verify_api_key
+from database.engine_factory import create_db_engine
 from utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -23,7 +24,7 @@ if DATABASE_URL and "sqlite" in DATABASE_URL:
     )
 else:
     # For other databases like PostgreSQL, use connection pooling
-    engine = create_engine(DATABASE_URL, pool_size=50, max_overflow=100, pool_timeout=10)
+    engine = create_db_engine(DATABASE_URL)
 
 db_session = scoped_session(sessionmaker(autocommit=False, autoflush=False, bind=engine))
 Base = declarative_base()

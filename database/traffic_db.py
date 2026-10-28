@@ -20,6 +20,7 @@ from sqlalchemy.orm import scoped_session, sessionmaker
 from sqlalchemy.pool import NullPool
 from sqlalchemy.sql import func
 
+from database.engine_factory import create_db_engine
 from database.settings_db import get_security_settings
 from utils.keyed_locks import KeyedLocks
 from utils.thread_safe_cache import MISSING, LockedTTLCache
@@ -46,7 +47,7 @@ if LOGS_DATABASE_URL and "sqlite" in LOGS_DATABASE_URL:
     )
 else:
     # For other databases like PostgreSQL, use connection pooling
-    logs_engine = create_engine(LOGS_DATABASE_URL, pool_size=50, max_overflow=100, pool_timeout=10)
+    logs_engine = create_db_engine(LOGS_DATABASE_URL)
 
 logs_session = scoped_session(sessionmaker(autocommit=False, autoflush=False, bind=logs_engine))
 LogBase = declarative_base()

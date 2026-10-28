@@ -1,0 +1,121 @@
+# Development services for OpenAlgo: PostgreSQL, Redis and DbGate.
+#
+# This file does NOT run OpenAlgo itself. Start the services here, then run the
+# app on the host with `uv run app.py` so code changes reload immediately.
+#
+#   docker compose -f docker-compose.dev.yaml up -d
+#   docker compose -f docker-compose.dev.yaml down        # stop, keep data
+#   docker compose -f docker-compose.dev.yaml down -v     # stop, delete data
+#
+# Host ports default to 5433 (PostgreSQL), 6380 (Redis) and 8082 (DbGate) so
+# they do not collide with services already running on the standard ports.
+# Override with OPENALGO_PG_PORT, OPENALGO_REDIS_PORT and OPENALGO_DBGATE_PORT.
+#
+# Every port is published on all host interfaces, so other machines on the
+# network can reach them. These are development credentials: never run this
+# file on a machine reachable from the internet. To keep a service on this
+# machine only, set OPENALGO_BIND=127.0.0.1.
+#
+# One database, one schema per former SQLite file (main, logs, latency, health,
+# sandbox). The schemas are created by install/postgres/init/01-schemas.sql on
+# first start, and the app also creates any missing schema when it connects.
+# Historify stays on DuckDB. See docs/development/postgres.md.
+
+name: openalgo-dev
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: openalgo-dev-postgres
+    environment:
+      POSTGRES_DB: ${OPENALGO_PG_DB:-openalgo}
+      POSTGRES_USER: ${OPENALGO_PG_USER:-openalgo}
+      POSTGRES_PASSWORD: ${OPENALGO_PG_PASSWORD:-openalgo}
+      TZ: Asia/Kolkata
+      PGTZ: Asia/Kolkata
+    ports:
+      - "${OPENALGO_BIND:-0.0.0.0}:${OPENALGO_PG_PORT:-5433}:5432"
+    volumes:
+      - openalgo_dev_pg:/var/lib/postgresql/data
+      - ./install/postgres/init:/docker-entrypoint-initdb.d:ro
+    command: ["postgres", "-c", "max_connections=200"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${OPENALGO_PG_USER:-openalgo} -d ${OPENALGO_PG_DB:-openalgo}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: openalgo-dev-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${OPENALGO_BIND:-0.0.0.0}:${OPENALGO_REDIS_PORT:-6380}:6379"
+    volumes:
+      - openalgo_dev_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  dbgate:
+    image: dbgate/dbgate:7.3.2-alpine
+    container_name: openalgo-dev-dbgate
+    environment:
+      # The connection to the dev database is preconfigured, so DbGate opens
+      # straight onto it. All five OpenAlgo schemas appear under it.
+      CONNECTIONS: openalgo
+      LABEL_openalgo: OpenAlgo (dev)
+      ENGINE_openalgo: postgres@dbgate-plugin-postgres
+      SERVER_openalgo: postgres
+      PORT_openalgo: "5432"
+      USER_openalgo: ${OPENALGO_PG_USER:-openalgo}
+      PASSWORD_openalgo: ${OPENALGO_PG_PASSWORD:-openalgo}
+      DATABASE_openalgo: ${OPENALGO_PG_DB:-openalgo}
+    volumes:
+      - openalgo_dev_dbgate:/root/.dbgate
+    ports:
+      - "${OPENALGO_BIND:-0.0.0.0}:${OPENALGO_DBGATE_PORT:-8082}:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Optional, for the market-data benchmark (docs/plans/2026-10-28-clickhouse-
+  # market-data-plan.md). Not started by `up -d`; start it with:
+  #   docker compose -f docker-compose.dev.yaml --profile clickhouse up -d
+  clickhouse:
+    image: clickhouse/clickhouse-server:26.8.36-alpine
+    container_name: openalgo-dev-clickhouse
+    profiles: ["clickhouse"]
+    environment:
+      CLICKHOUSE_DB: ${OPENALGO_CH_DB:-openalgo}
+      CLICKHOUSE_USER: ${OPENALGO_CH_USER:-openalgo}
+      CLICKHOUSE_PASSWORD: ${OPENALGO_CH_PASSWORD:-openalgo}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+      TZ: Asia/Kolkata
+    ports:
+      - "${OPENALGO_BIND:-0.0.0.0}:${OPENALGO_CH_HTTP_PORT:-8124}:8123"
+      - "${OPENALGO_BIND:-0.0.0.0}:${OPENALGO_CH_NATIVE_PORT:-9001}:9000"
+    volumes:
+      - openalgo_dev_clickhouse:/var/lib/clickhouse
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    mem_limit: ${OPENALGO_CH_MEMORY:-4g}
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8123/ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+volumes:
+  openalgo_dev_pg:
+  openalgo_dev_redis:
+  openalgo_dev_dbgate:
+  openalgo_dev_clickhouse:

@@ -8,6 +8,7 @@ from sqlalchemy.orm import scoped_session, sessionmaker
 from sqlalchemy.pool import NullPool
 from sqlalchemy.sql import func
 
+from database.engine_factory import create_db_engine
 from utils.thread_safe_cache import LockedTTLCache
 
 logger = logging.getLogger(__name__)
@@ -23,9 +24,7 @@ if LATENCY_DATABASE_URL and "sqlite" in LATENCY_DATABASE_URL:
     )
 else:
     # For other databases like PostgreSQL, use connection pooling
-    latency_engine = create_engine(
-        LATENCY_DATABASE_URL, pool_size=50, max_overflow=100, pool_timeout=10
-    )
+    latency_engine = create_db_engine(LATENCY_DATABASE_URL)
 
 latency_session = scoped_session(
     sessionmaker(autocommit=False, autoflush=False, bind=latency_engine)
