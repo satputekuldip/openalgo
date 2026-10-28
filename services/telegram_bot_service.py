@@ -44,6 +44,7 @@ from database.telegram_db import (
 )
 from utils import real_threading
 from utils.constants import CRYPTO_BROKERS
+from utils.data_mode import LiveModeUnavailable
 from utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -2740,6 +2741,10 @@ class TelegramBotService:
                 except TimeoutError:
                     logger.warning("Telegram mode change did not finish in time")
                     await query.edit_message_text(MODE_CHANGE_SLOW_MESSAGE)
+                    log_command(user.id, callback_data, chat_id)
+                    return
+                except LiveModeUnavailable as e:
+                    await query.edit_message_text(str(e))
                     log_command(user.id, callback_data, chat_id)
                     return
 

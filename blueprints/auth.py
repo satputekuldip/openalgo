@@ -31,6 +31,7 @@ from database.user_db import (  # Import the function
 from extensions import socketio
 from limiter import limiter  # Import the limiter instance
 from utils.config import build_external_url
+from utils.data_mode import PUBLIC_BROKER, public_data_mode
 from utils.email_debug import debug_smtp_connection
 from utils.email_utils import send_password_reset_email, send_test_email
 from utils.ip_helper import get_real_ip
@@ -121,6 +122,17 @@ def get_broker_config():
     broker_name is always returned (needed to display the broker login button).
     broker_api_key and redirect_url are only returned when authenticated.
     """
+    if public_data_mode():
+        return jsonify(
+            {
+                "status": "success",
+                "broker_name": PUBLIC_BROKER,
+                "broker_api_key": None,
+                "redirect_url": None,
+                "public_data_mode": True,
+            }
+        )
+
     REDIRECT_URL = os.getenv("REDIRECT_URL")
 
     # Extract broker name from redirect URL
@@ -202,6 +214,12 @@ def _try_resume_broker_session(username):
         if not auth_obj or auth_obj.is_revoked:
             return None
 
+        # A session stored while the install ran without a broker never
+        # expires, so it would pass the check below. Once a broker is
+        # configured it must not be resumed: the trader logs in to the broker.
+        if auth_obj.broker == PUBLIC_BROKER and not public_data_mode():
+            return None
+
         # Decrypt the stored broker token
         auth_token = decrypt_token(auth_obj.auth)
         if not auth_token:
@@ -271,6 +289,40 @@ def _try_resume_broker_session(username):
     except Exception as e:
         logger.error(f"Error trying to resume broker session: {e}", exc_info=True)
         return None
+
+
+def _connect_public_data(username):
+    """Finish the login of a public-data install, which has no broker to log in to.
+
+    The stored placeholder token is reused when there is one: upsert_auth tears
+    the shared feed down whenever the token changes, so minting a new one on
+    every login would drop every other device's stream (the #1591 invariant).
+    """
+    from database.auth_db import decrypt_token, get_auth_token_dbquery
+    from utils.auth_utils import handle_auth_success
+
+    auth_token = None
+    auth_obj = get_auth_token_dbquery(username)
+    if auth_obj and not auth_obj.is_revoked and auth_obj.broker == PUBLIC_BROKER:
+        auth_token = decrypt_token(auth_obj.auth)
+    if not auth_token:
+        auth_token = f"public-{secrets.token_hex(16)}"
+
+    return handle_auth_success(
+        auth_token=auth_token,
+        user_session_key=username,
+        broker=PUBLIC_BROKER,
+    )
+
+
+@auth_bp.route("/public-connect", methods=["POST"])
+def public_connect():
+    """Complete the login without a broker. Only available in public-data mode."""
+    if not public_data_mode():
+        return jsonify({"status": "error", "message": "This install uses a broker login."}), 404
+    if "user" not in session:
+        return jsonify({"status": "error", "message": "Log in to OpenAlgo first."}), 401
+    return _connect_public_data(session["user"])
 
 
 @auth_bp.route("/login", methods=["GET", "POST"])
@@ -357,6 +409,13 @@ def login():
                 ), 200
 
             session["user"] = username  # Set the username in the session
+
+            if public_data_mode():
+                from database.auth_db import log_login_attempt
+
+                log_login_attempt(username, ip, ua, status="success",
+                                  login_type="password", broker=PUBLIC_BROKER)
+                return _connect_public_data(username)
 
             # Try to resume existing broker session (skip OAuth if token still valid)
             resumed = _try_resume_broker_session(username)
@@ -459,6 +518,11 @@ def login_totp():
     ip = get_real_ip()
     ua = request.headers.get("User-Agent", "")
     from database.auth_db import log_login_attempt
+
+    if public_data_mode():
+        log_login_attempt(pending_username, ip, ua, status="success",
+                          login_type="totp", broker=PUBLIC_BROKER)
+        return _connect_public_data(pending_username)
 
     # Try resuming an existing broker session, same path as plain login.
     resumed = _try_resume_broker_session(pending_username)
@@ -570,6 +634,9 @@ def broker_login():
     if request.method == "GET":
         if "user" not in session:
             return redirect("/login")
+
+        if public_data_mode():
+            return _connect_public_data(session["user"])
 
         # Redirect to React broker selection page
         return redirect("/broker")
@@ -1155,6 +1222,7 @@ def toggle_analyzer_mode_session():
 
     try:
         from services.analyzer_service import MODE_BUSY_MESSAGE, apply_analyze_mode
+        from utils.data_mode import LiveModeUnavailable
         from utils.keyed_locks import LockBusy
 
         # Toggle the current mode and start or stop the execution engine and
@@ -1164,6 +1232,8 @@ def toggle_analyzer_mode_session():
             new_mode = apply_analyze_mode(toggle=True)
         except LockBusy:
             return jsonify({"status": "error", "message": MODE_BUSY_MESSAGE}), 409
+        except LiveModeUnavailable as e:
+            return jsonify({"status": "error", "message": str(e)}), 409
 
         return jsonify(
             {

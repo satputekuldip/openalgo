@@ -5,6 +5,7 @@ from functools import wraps
 import pytz
 from flask import redirect, session, url_for
 
+from utils.data_mode import PUBLIC_BROKER, public_data_mode
 from utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -58,6 +59,12 @@ def is_session_valid():
     """Check if the current session is valid"""
     if not session.get("logged_in"):
         logger.debug("Session invalid: 'logged_in' flag not set")
+        return False
+
+    # A session opened while the install ran without a broker ends as soon as
+    # a broker is configured, so the trader is sent to the broker login.
+    if session.get("broker") == PUBLIC_BROKER and not public_data_mode():
+        logger.debug("Session invalid: opened without a broker, and a broker is now configured")
         return False
 
     # If no login time is set, consider session invalid

@@ -51,6 +51,12 @@ db/strategy_encryption.key
 # DB backup files (created by upgrade/rotate_pepper.py and other migrations)
 db/backups/
 
+# Exchange files downloaded for installs without a broker (services/public_data)
+db/public_data/
+
+# Market-data benchmark files and results (scripts/marketdata_benchmark.py)
+db/benchmarks/
+
 # CSV Files (except specific data files)
 *.csv
 !symbols.csv

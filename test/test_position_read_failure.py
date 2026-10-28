@@ -20,6 +20,7 @@ broker:
 """
 
 import importlib
+import json
 import os
 import time
 from dataclasses import dataclass, field, replace
@@ -44,10 +45,26 @@ from utils.position_read import (
 from utils.smart_order_guard import PositionBookCache
 from utils.thread_safe_cache import LockedTTLCache
 
+
+def _places_live_orders(name):
+    """False for a plugin whose plugin.json says it never sends a live order.
+
+    broker/publicdata serves an install without a broker: its order functions
+    refuse outright and never read a position book, so there is nothing here
+    for it to answer.
+    """
+    manifest = os.path.join("broker", name, "plugin.json")
+    if not os.path.exists(manifest):
+        return True
+    with open(manifest) as f:
+        return json.load(f).get("live_orders", True)
+
+
 BROKERS = sorted(
     name
     for name in os.listdir("broker")
     if os.path.exists(os.path.join("broker", name, "api", "order_api.py"))
+    and _places_live_orders(name)
 )
 
 FAILURES = ("exception", "http_error", "error_status", "unparseable")

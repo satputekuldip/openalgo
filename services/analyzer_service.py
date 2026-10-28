@@ -9,6 +9,7 @@ from database.apilog_db import async_log_order
 from database.apilog_db import executor as log_executor
 from database.auth_db import get_auth_token_broker
 from database.settings_db import get_analyze_mode, set_analyze_mode
+from utils.data_mode import LiveModeUnavailable
 from utils.keyed_locks import LockBusy
 from utils.logging import get_logger
 
@@ -234,6 +235,10 @@ def toggle_analyzer_mode_with_auth(
             busy_response = {"status": "error", "message": MODE_BUSY_MESSAGE}
             log_executor.submit(async_log_order, "analyzer_toggle", original_data, busy_response)
             return False, busy_response, 409
+        except LiveModeUnavailable as e:
+            refused = {"status": "error", "message": str(e)}
+            log_executor.submit(async_log_order, "analyzer_toggle", original_data, refused)
+            return False, refused, 409
 
         # Get logs count for response
         logs_count = db_session.query(AnalyzerLog).count()

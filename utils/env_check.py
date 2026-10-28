@@ -1209,6 +1209,70 @@ def _generate_keys_on_first_run(env_path: str) -> None:
         )
 
 
+def _validate_broker_redirect_url() -> None:
+    """Exit unless REDIRECT_URL names a broker listed in VALID_BROKERS."""
+    import re
+
+    # Check REDIRECT_URL configuration
+    redirect_url = os.getenv("REDIRECT_URL")
+    default_value = "http://127.0.0.1:5000/<broker>/callback"
+
+    if redirect_url == default_value:
+        print("\nError: Default REDIRECT_URL detected in .env file.")
+        print("The application cannot start with the default configuration.")
+        print("\nPlease:")
+        print("1. Open your .env file")
+        print("2. Change the REDIRECT_URL to use your specific broker")
+        print("3. Save the file")
+        print("\nExample: If using Zerodha, change:")
+        print(f"  REDIRECT_URL = '{default_value}'")
+        print("to:")
+        print("  REDIRECT_URL = 'http://127.0.0.1:5000/zerodha/callback'")
+        sys.exit(1)
+
+    if "<broker>" in redirect_url:
+        print("\nError: Invalid REDIRECT_URL configuration detected.")
+        print("The application cannot start with '<broker>' in REDIRECT_URL.")
+        print("\nPlease update your .env file to use your specific broker name.")
+        print("Example: http://127.0.0.1:5000/zerodha/callback")
+        sys.exit(1)
+
+    # Validate broker name
+    valid_brokers_str = os.getenv("VALID_BROKERS", "")
+    if not valid_brokers_str:
+        print("\nError: VALID_BROKERS not configured in .env file.")
+        print("\nSolution: Check the .sample.env file for the latest configuration")
+        print("The application cannot start without valid broker configuration.")
+        sys.exit(1)
+
+    valid_brokers = set(broker.strip().lower() for broker in valid_brokers_str.split(","))
+
+    try:
+        import re
+
+        match = re.search(r"/([^/]+)/callback$", redirect_url)
+        if not match:
+            print("\nError: Invalid REDIRECT_URL format.")
+            print("The URL must end with '/broker_name/callback'")
+            print("Example: http://127.0.0.1:5000/zerodha/callback")
+            sys.exit(1)
+
+        broker_name = match.group(1).lower()
+        if broker_name not in valid_brokers:
+            print("\nError: Invalid broker name in REDIRECT_URL.")
+            print(f"Broker '{broker_name}' is not in the list of valid brokers.")
+            print(f"\nValid brokers are: {', '.join(sorted(valid_brokers))}")
+            print("\nPlease update your REDIRECT_URL with a valid broker name.")
+            sys.exit(1)
+
+    except Exception as e:
+        print("\nError: Could not validate REDIRECT_URL format.")
+        print(f"Details: {str(e)}")
+        print("\nThe URL must follow the format: http://domain/broker_name/callback")
+        print("Example: http://127.0.0.1:5000/zerodha/callback")
+        sys.exit(1)
+
+
 def load_and_check_env_variables() -> None:
     """
     Load environment variables from .env and check for required critical variables.
@@ -1284,6 +1348,13 @@ def load_and_check_env_variables() -> None:
     ]
 
     # Check if each required environment variable is set
+    # OPENALGO_DATA_MODE = 'public' runs without a broker (utils/data_mode.py),
+    # so the broker keys are optional there. Unset, nothing below changes.
+    public_mode = os.getenv("OPENALGO_DATA_MODE", "").strip().lower() == "public"
+    if public_mode:
+        broker_vars = {"BROKER_API_KEY", "BROKER_API_SECRET", "REDIRECT_URL"}
+        required_vars = [var for var in required_vars if var not in broker_vars]
+
     missing_vars = [var for var in required_vars if os.getenv(var) is None]
 
     if missing_vars:
@@ -1379,64 +1450,9 @@ def load_and_check_env_variables() -> None:
         print("Example: WEBSOCKET_PORT='8765'")
         sys.exit(1)
 
-    # Check REDIRECT_URL configuration
-    redirect_url = os.getenv("REDIRECT_URL")
-    default_value = "http://127.0.0.1:5000/<broker>/callback"
-
-    if redirect_url == default_value:
-        print("\nError: Default REDIRECT_URL detected in .env file.")
-        print("The application cannot start with the default configuration.")
-        print("\nPlease:")
-        print("1. Open your .env file")
-        print("2. Change the REDIRECT_URL to use your specific broker")
-        print("3. Save the file")
-        print("\nExample: If using Zerodha, change:")
-        print(f"  REDIRECT_URL = '{default_value}'")
-        print("to:")
-        print("  REDIRECT_URL = 'http://127.0.0.1:5000/zerodha/callback'")
-        sys.exit(1)
-
-    if "<broker>" in redirect_url:
-        print("\nError: Invalid REDIRECT_URL configuration detected.")
-        print("The application cannot start with '<broker>' in REDIRECT_URL.")
-        print("\nPlease update your .env file to use your specific broker name.")
-        print("Example: http://127.0.0.1:5000/zerodha/callback")
-        sys.exit(1)
-
-    # Validate broker name
-    valid_brokers_str = os.getenv("VALID_BROKERS", "")
-    if not valid_brokers_str:
-        print("\nError: VALID_BROKERS not configured in .env file.")
-        print("\nSolution: Check the .sample.env file for the latest configuration")
-        print("The application cannot start without valid broker configuration.")
-        sys.exit(1)
-
-    valid_brokers = set(broker.strip().lower() for broker in valid_brokers_str.split(","))
-
-    try:
-        import re
-
-        match = re.search(r"/([^/]+)/callback$", redirect_url)
-        if not match:
-            print("\nError: Invalid REDIRECT_URL format.")
-            print("The URL must end with '/broker_name/callback'")
-            print("Example: http://127.0.0.1:5000/zerodha/callback")
-            sys.exit(1)
-
-        broker_name = match.group(1).lower()
-        if broker_name not in valid_brokers:
-            print("\nError: Invalid broker name in REDIRECT_URL.")
-            print(f"Broker '{broker_name}' is not in the list of valid brokers.")
-            print(f"\nValid brokers are: {', '.join(sorted(valid_brokers))}")
-            print("\nPlease update your REDIRECT_URL with a valid broker name.")
-            sys.exit(1)
-
-    except Exception as e:
-        print("\nError: Could not validate REDIRECT_URL format.")
-        print(f"Details: {str(e)}")
-        print("\nThe URL must follow the format: http://domain/broker_name/callback")
-        print("Example: http://127.0.0.1:5000/zerodha/callback")
-        sys.exit(1)
+    # A public-data install has no broker, so it has no broker callback.
+    if not public_mode:
+        _validate_broker_redirect_url()
 
     # Validate rate limits format
     rate_limit_vars = [

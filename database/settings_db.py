@@ -12,6 +12,8 @@ from sqlalchemy.orm import scoped_session, sessionmaker
 from sqlalchemy.pool import NullPool
 
 from database.auth_db import PEPPER
+from database.engine_factory import create_db_engine
+from utils.data_mode import LiveModeUnavailable, public_data_mode
 from utils.logging import get_logger
 from utils.thread_safe_cache import MISSING, LockedTTLCache
 
@@ -37,7 +39,7 @@ if DATABASE_URL and "sqlite" in DATABASE_URL:
     )
 else:
     # For other databases like PostgreSQL, use connection pooling
-    engine = create_engine(DATABASE_URL, pool_size=50, max_overflow=100, pool_timeout=10)
+    engine = create_db_engine(DATABASE_URL)
 
 db_session = scoped_session(sessionmaker(autocommit=False, autoflush=False, bind=engine))
 Base = declarative_base()
@@ -87,6 +89,11 @@ def init_db():
 
 def get_analyze_mode():
     """Get current analyze mode setting (cached for 1 hour)"""
+    # With no broker there is nothing to send a live order to, whatever an
+    # earlier broker-backed run of this install left in the settings row.
+    if public_data_mode():
+        return True
+
     cache_key = "analyze_mode"
 
     # Check cache first. One get, never a membership test then a subscript:
@@ -111,7 +118,15 @@ def get_analyze_mode():
 
 
 def set_analyze_mode(mode: bool):
-    """Set analyze mode setting"""
+    """Set analyze mode setting.
+
+    Raises:
+        LiveModeUnavailable: Live mode was requested on an install with no
+            broker (``OPENALGO_DATA_MODE = 'public'``).
+    """
+    if not mode and public_data_mode():
+        raise LiveModeUnavailable()
+
     settings = Settings.query.first()
     if not settings:
         settings = Settings(analyze_mode=mode)

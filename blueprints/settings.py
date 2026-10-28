@@ -4,6 +4,7 @@ from flask import Blueprint, jsonify, request
 
 from database.settings_db import get_analyze_mode
 from services.analyzer_service import MODE_BUSY_MESSAGE, apply_analyze_mode
+from utils.data_mode import LiveModeUnavailable
 from utils.keyed_locks import LockBusy
 from utils.logging import get_logger
 from utils.session import check_session_validity
@@ -36,6 +37,8 @@ def set_mode(mode):
             apply_analyze_mode(bool(mode), with_scheduler=False, catchup=False)
         except LockBusy:
             return jsonify({"error": MODE_BUSY_MESSAGE}), 409
+        except LiveModeUnavailable as e:
+            return jsonify({"error": str(e)}), 409
         mode_name = "Analyze" if mode else "Live"
 
         return jsonify(

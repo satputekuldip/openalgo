@@ -1,0 +1,12 @@
+{
+    "Plugin Name": "publicdata",
+    "Plugin URI": "https://openalgo.in",
+    "Description": "Public market data for installs without a broker. Sandbox mode only.",
+    "Version": "1.0",
+    "Author": "OpenAlgo",
+    "Author URI": "https://openalgo.in",
+    "supported_exchanges": ["NSE", "NFO", "NSE_INDEX"],
+    "broker_type": "public_data",
+    "leverage_config": false,
+    "live_orders": false
+}

@@ -1,5 +1,7 @@
 import { BookOpen, ExternalLink, Info, Loader2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router'
+import { authClient } from '@/api/client'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { BrokerAuthSignOut } from '@/components/auth/BrokerAuthSignOut'
 import { Button } from '@/components/ui/button'
@@ -59,6 +61,8 @@ interface BrokerConfig {
   broker_name: string
   broker_api_key: string
   redirect_url: string
+  /** True when the install runs without a broker, on public market data. */
+  public_data_mode?: boolean
 }
 
 // Helper function to get Flattrade API key
@@ -80,7 +84,8 @@ function generateRandomState(): string {
 }
 
 export default function BrokerSelect() {
-  const { user } = useAuthStore()
+  const { user, login } = useAuthStore()
+  const navigate = useNavigate()
   const [selectedBroker, setSelectedBroker] = useState<string>('')
   const [isLoading, setIsLoading] = useState(true)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -96,7 +101,16 @@ export default function BrokerSelect() {
         })
         const data = await response.json()
 
-        if (data.status === 'success') {
+        if (data.status === 'success' && data.public_data_mode) {
+          // No broker to log in to: finish the connection and go straight in.
+          const result = await authClient.post('/auth/public-connect')
+          if (result.data?.status === 'success') {
+            login(user?.username ?? '', data.broker_name)
+            navigate(result.data.redirect || '/dashboard', { replace: true })
+            return
+          }
+          setError(result.data?.message || 'Could not open the sandbox. Try logging in again.')
+        } else if (data.status === 'success') {
           setBrokerConfig(data)
           // Auto-select the configured broker
           setSelectedBroker(data.broker_name)
@@ -111,7 +125,7 @@ export default function BrokerSelect() {
     }
 
     fetchBrokerConfig()
-  }, [])
+  }, [login, navigate, user?.username])
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
