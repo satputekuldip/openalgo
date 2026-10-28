@@ -1,16 +1,19 @@
-"""Where the chain recorder writes: a table in the Historify DuckDB file.
+"""Where the chain recorder writes.
 
-It goes through Historify's own connection helper and write serialisation
-(``database/historify_db.py``), so the ClickHouse plan's Phase 0 measures the
-write path the platform really has, not a friendlier copy of it.
+With ClickHouse configured (``CLICKHOUSE_URL``), snapshots go to its
+``option_chain`` table through the batched writer (services/marketdata_store).
+Otherwise they go to a table in the Historify DuckDB file, through Historify's
+own connection helper and write serialisation (``database/historify_db.py``).
 
-The table is created when the recorder first starts, not at app start, so an
-install that never enables recording never gets it.
+The DuckDB table is created when the recorder first starts, not at app start,
+so an install that never enables recording never gets it.
 """
 
 import pandas as pd
 
 from database.historify_db import _retry_duckdb_conflict, _serialized_write, get_connection
+from services.marketdata_store.clickhouse import clickhouse_enabled
+from services.marketdata_store.writer import write
 from utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -54,19 +57,40 @@ CREATE TABLE IF NOT EXISTS {TABLE} (
 """
 
 
+def ensure_table() -> None:
+    """Create the DuckDB table, unless snapshots go to ClickHouse."""
+    if clickhouse_enabled():
+        return  # the writer creates ClickHouse's option_chain table itself
+    _ensure_duckdb_table()
+
+
 @_serialized_write
 @_retry_duckdb_conflict
-def ensure_table() -> None:
+def _ensure_duckdb_table() -> None:
     with get_connection() as conn:
         conn.execute(_CREATE)
 
 
-@_serialized_write
-@_retry_duckdb_conflict
 def write_snapshot(rows: list[dict]) -> int:
-    """Append one snapshot's rows in a single insert. Returns the row count."""
+    """Store one snapshot. ClickHouse when configured, else DuckDB. Returns the row count."""
     if not rows:
         return 0
+    if clickhouse_enabled():
+        write("option_chain", [_for_clickhouse(row) for row in rows])
+        return len(rows)
+    return _write_duckdb(rows)
+
+
+def _for_clickhouse(row: dict) -> dict:
+    out = dict(row)
+    out["ts"] = row["ts"].strftime("%Y-%m-%d %H:%M:%S")
+    out["expiry"] = row["expiry"].isoformat()
+    return out
+
+
+@_serialized_write
+@_retry_duckdb_conflict
+def _write_duckdb(rows: list[dict]) -> int:
     frame = pd.DataFrame(rows, columns=COLUMNS)  # noqa: F841 (read by DuckDB by name)
     with get_connection() as conn:
         conn.execute(f"INSERT INTO {TABLE} SELECT * FROM frame")

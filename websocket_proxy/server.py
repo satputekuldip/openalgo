@@ -2204,6 +2204,27 @@ async def _exit_when_orphaned(proxy, parent_pid: int) -> None:
         proxy.running = False
 
 
+def _start_tick_recording() -> None:
+    try:
+        from services.marketdata_store.tick_recorder import start_tick_recorder
+
+        start_tick_recorder()
+    except Exception:
+        logger.exception("Could not start ClickHouse tick recording in the proxy")
+
+
+def _stop_tick_recording() -> None:
+    """Stop recording and send what the ClickHouse writer still holds."""
+    try:
+        from services.marketdata_store.tick_recorder import stop_tick_recorder
+        from services.marketdata_store.writer import stop_writer
+
+        stop_tick_recorder()
+        stop_writer()
+    except Exception:
+        logger.exception("Could not stop ClickHouse tick recording in the proxy")
+
+
 # Entry point for running the server standalone
 async def main():
     """Main entry point for running the WebSocket proxy server"""
@@ -2220,6 +2241,11 @@ async def main():
 
         # Create and start the WebSocket proxy
         proxy = WebSocketProxy(host=ws_host, port=ws_port)
+
+        # Every tick passes through this process's MarketDataService, so
+        # ClickHouse tick recording runs here when the proxy is its own
+        # process. No-op unless CLICKHOUSE_URL is set.
+        _start_tick_recording()
 
         parent_pid = _expected_parent_pid()
         if parent_pid is not None:
@@ -2245,6 +2271,7 @@ async def main():
     finally:
         if orphan_watch is not None:
             orphan_watch.cancel()
+        _stop_tick_recording()
         # Always clean up resources
         if proxy:
             try:

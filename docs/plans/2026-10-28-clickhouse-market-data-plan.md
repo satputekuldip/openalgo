@@ -1,9 +1,9 @@
 # ClickHouse for Market Data Analytics: Plan
 
-**Status:** Phase 0 tooling built: the option-chain recorder on DuckDB, the
-benchmark with its fixed thresholds, and a ClickHouse dev profile to compare
-against. The recorded week and the real benchmark run have not happened yet,
-so there is no go/no-go decision. See section 8.
+**Status:** ClickHouse is built as an optional store (2026-10-28). Phase 0
+(measure first) was skipped by decision: the benchmark script was removed
+before it ran. See section 8 for what exists and how it differs from the
+design above.
 **Date:** 2026-10-28
 **Related:**
 [2026-10-28-trading-first-product-plan.md](2026-10-28-trading-first-product-plan.md) (section 6.2, historical options data),
@@ -156,63 +156,60 @@ CLICKHOUSE_URL = 'http://openalgo:openalgo@127.0.0.1:8124/openalgo'
    and 9000 are free too. The non-default choice still avoids collisions with
    other projects' ClickHouse containers.
 
-## 8. Phase 0: what exists and how to run it
+## 8. What is built (2026-10-28)
 
-### The recorder
+**Decision:** build ClickHouse support without the Phase 0 benchmark. The
+benchmark script and its thresholds were removed unrun.
 
-`services/chain_recorder/` records into `option_chain_snapshots` in the
-Historify DuckDB file, through Historify's own connection helper and write
-serialisation. Off unless enabled in `.env`:
+**Design as built, and where it differs from section 3:**
+
+- **Off unless `CLICKHOUSE_URL` is set.** An install without it runs exactly as
+  before. `.sample.env` documents the keys, commented out.
+- **DuckDB stays Historify's store.** Section 3.1 proposed moving Historify
+  behind a provider interface with a backend switch. Historify's bar table is
+  used by about twenty functions (downloads, aggregation, catalog, exports), so
+  instead every bar Historify commits is also copied to ClickHouse's `ohlcv`
+  (`_mirror_to_clickhouse` in `database/historify_db.py`). Historify's screens
+  and exports read DuckDB, unchanged. `scripts/historify_to_clickhouse.py`
+  copies bars downloaded before ClickHouse was turned on.
+- **Every streamed tick is recorded** into `ticks` (TTL
+  `CLICKHOUSE_TICK_TTL_DAYS`, default 90), and a materialized view builds
+  1-minute bars, read through `tick_bars_1m_view`. `CLICKHOUSE_RECORD_TICKS =
+  'false'` turns that off. It records in the process that runs the WebSocket
+  proxy, because every tick passes through that process's MarketDataService:
+  the app on the development server, the proxy process under gunicorn and
+  Docker. Each tick is recorded once.
+- **The option-chain recorder** (`CHAIN_RECORDER_ENABLED`) writes to
+  `option_chain` when ClickHouse is on, and to DuckDB otherwise.
+- **Writes never wait on the network.** Callers append to a bounded buffer
+  (200,000 rows per table); one thread inserts every second, one insert per
+  table. If ClickHouse is down, rows wait and the oldest are dropped once the
+  buffer is full, and the writer backs off. Nothing on the trading path waits.
+- **HTTP, not a native driver.** The client is httpx over Python sockets,
+  which eventlet patches, so it is cooperative under the default worker.
+- **Bar volume:** ticks carry the day's cumulative volume, and price-only
+  ticks carry 0. A minute's volume is the rise across it, counting only ticks
+  that report volume; a minute with none reads 0. The first volume tick of a
+  minute is the baseline, so trades between the previous minute's last tick
+  and this minute's first are not counted.
+
+**Not built:** reading ClickHouse from Historify's charts, backtests or option
+tools (Phase 4), a daily-OI view, production install scripts and backup docs
+(Phase 5).
+
+**Configuration:**
 
 ```
-CHAIN_RECORDER_ENABLED = 'true'
-CHAIN_RECORDER_UNDERLYINGS = 'NIFTY,BANKNIFTY,RELIANCE,HDFCBANK,INFY'   # default
-CHAIN_RECORDER_EXPIRIES = '2'                # nearest expiries per underlying
-CHAIN_RECORDER_STRIKES_EACH_SIDE = '20'      # strikes either side of the money
+CLICKHOUSE_URL = 'http://openalgo:openalgo@127.0.0.1:8124/openalgo'
+CLICKHOUSE_RECORD_TICKS = 'true'
+CLICKHOUSE_TICK_TTL_DAYS = '90'
+CHAIN_RECORDER_ENABLED = 'true'              # optional; NIFTY, BANKNIFTY and 3 stocks by default
+CHAIN_RECORDER_UNDERLYINGS = 'NIFTY,BANKNIFTY,RELIANCE,HDFCBANK,INFY'
+CHAIN_RECORDER_EXPIRIES = '2'
+CHAIN_RECORDER_STRIKES_EACH_SIDE = '20'
 CHAIN_RECORDER_INTERVAL_SECONDS = '5'
 ```
 
-It starts after the master contract loads, records weekdays 09:15 to 15:30
-IST, and stops on logout and at shutdown. It needs a live broker feed.
-
-**A change from section 2:** "every expiry" is not recordable. A broker streams
-about 3,000 symbols in all (`MAX_SYMBOLS_PER_WEBSOCKET` x
-`MAX_WEBSOCKET_CONNECTIONS`), and NIFTY alone lists more than that across its
-expiries. The defaults record 5 underlyings x 2 expiries x 41 strikes x CE/PE =
-820 contracts, about 3.7 million rows a trading day.
-
-**Strikes are fixed at start.** They are centred on the money when the
-recorder starts and are not re-centred during the day. A large move leaves the
-recorded band off-centre until the next login.
-
-### The benchmark
-
-```bash
-docker compose -f docker-compose.dev.yaml --profile clickhouse up -d clickhouse
-uv run python scripts/marketdata_benchmark.py \
-    --clickhouse http://openalgo:openalgo@127.0.0.1:8124/openalgo
-```
-
-It generates the recorder's exact data shape inside each engine (20 days of
-chain snapshots and a year of 1-minute bars for 200 symbols by default), runs
-the plan's five measurements and prints the verdict against
-`scripts/marketdata_benchmark_thresholds.json`. Results go to
-`db/benchmarks/marketdata_phase0.json`. It never touches the platform's own
-DuckDB file or tables.
-
-**The thresholds are proposals and must be confirmed before the first real
-run.** Changing them after reading results defeats the go/no-go rule.
-
-Limits of the comparison, to keep in mind when reading results:
-
-- Data is synthetic. The recorded week validates the shape and the row rate;
-  the benchmark then scales that shape up.
-- Both engines generate their data server-side (`INSERT ... SELECT`), so write
-  times exclude the client sending rows, which the real recorder pays.
-- DuckDB is measured in one process. Under gunicorn the app and the WebSocket
-  proxy are separate processes, and DuckDB allows one writing process per
-  file: a recorder in the proxy process could not write to the Historify file
-  at all while the app holds it. That is not a benchmark number but it bears
-  on the decision.
-- A smoke run at 1 day and tiny scale (both engines, 2026-10-28) completed
-  with no errors; its numbers mean nothing at that size.
+"Every expiry" (section 2) is not recordable: a broker streams about 3,000
+symbols in all, and NIFTY alone lists more than that. The chain recorder's
+strikes are centred when it starts and not re-centred during the day.

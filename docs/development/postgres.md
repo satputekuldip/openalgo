@@ -34,8 +34,9 @@ docker compose -f docker-compose.dev.yaml up -d
 
 | Service | Host address | Purpose |
 | --- | --- | --- |
-| PostgreSQL 17 | `127.0.0.1:5433` | Database `openalgo`, user and password `openalgo` |
-| Redis 7 | `127.0.0.1:6380` | Reserved for caching and pub/sub work; nothing uses it yet |
+| PostgreSQL 17 | `<host>:5433` | Database `openalgo`, user and password `openalgo` |
+| ClickHouse 26.8 | `<host>:8124` (HTTP), `<host>:9001` (native) | Market-data store, used when `CLICKHOUSE_URL` is set |
+| Redis 7 | `<host>:6380` | Reserved for caching and pub/sub work; nothing uses it yet |
 | DbGate | `http://<host>:8082` | Browse, query and edit all five schemas |
 
 The host ports avoid the standard 5432 and 6379 so they do not collide with
@@ -48,17 +49,20 @@ no login of its own. Never run this file on a machine reachable from the
 internet. To keep them on this machine only, start with
 `OPENALGO_BIND=127.0.0.1`.
 
-### ClickHouse (optional)
+### ClickHouse
 
-For the market-data benchmark only, and not started by `up -d`:
+Runs with the other services. The app uses it only when `CLICKHOUSE_URL` is
+set in `.env` (it is, in this development environment). HTTP on port 8124,
+native on 9001, user and password `openalgo`, capped at 4 GB of memory
+(`OPENALGO_CH_MEMORY`). What it stores and why:
+`docs/plans/2026-10-28-clickhouse-market-data-plan.md`, section 8.
+
+Look at recorded data:
 
 ```bash
-docker compose -f docker-compose.dev.yaml --profile clickhouse up -d clickhouse
+curl -s "http://openalgo:openalgo@127.0.0.1:8124/" --data-binary \
+  "SELECT symbol, count() FROM openalgo.ticks GROUP BY symbol FORMAT PrettyCompact"
 ```
-
-HTTP on port 8124, native on 9001, user and password `openalgo`, capped at
-4 GB of memory (`OPENALGO_CH_MEMORY`). See
-`docs/plans/2026-10-28-clickhouse-market-data-plan.md`, section 8.
 
 ### DbGate
 

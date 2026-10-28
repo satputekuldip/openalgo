@@ -1,4 +1,4 @@
-# Development services for OpenAlgo: PostgreSQL, Redis and DbGate.
+# Development services for OpenAlgo: PostgreSQL, Redis, ClickHouse and DbGate.
 #
 # This file does NOT run OpenAlgo itself. Start the services here, then run the
 # app on the host with `uv run app.py` so code changes reload immediately.
@@ -84,13 +84,12 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  # Optional, for the market-data benchmark (docs/plans/2026-10-28-clickhouse-
-  # market-data-plan.md). Not started by `up -d`; start it with:
-  #   docker compose -f docker-compose.dev.yaml --profile clickhouse up -d
+  # Market-data store: recorded ticks, option-chain snapshots and a copy of
+  # Historify's bars (services/marketdata_store). The app uses it only when
+  # CLICKHOUSE_URL is set in .env; without that, it runs here unused.
   clickhouse:
     image: clickhouse/clickhouse-server:26.8.36-alpine
     container_name: openalgo-dev-clickhouse
-    profiles: ["clickhouse"]
     environment:
       CLICKHOUSE_DB: ${OPENALGO_CH_DB:-openalgo}
       CLICKHOUSE_USER: ${OPENALGO_CH_USER:-openalgo}

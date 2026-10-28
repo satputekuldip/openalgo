@@ -887,6 +887,18 @@ def setup_environment(app):
             except Exception as e:
                 logger.error(f"Failed to initialize Historify scheduler: {e}")
 
+            # Streamed ticks into ClickHouse, from boot rather than only after a
+            # login, so a restart does not leave a gap. No-op unless
+            # CLICKHOUSE_URL is set.
+            try:
+                from services.marketdata_store.tick_recorder import (
+                    start_tick_recorder_if_proxy_in_process,
+                )
+
+                start_tick_recorder_if_proxy_in_process()
+            except Exception:
+                logger.exception("Failed to start the ClickHouse tick recorder")
+
             try:
                 # Multi-leg options strategies with end-to-end risk management.
                 # Starts its own order-update subscriber, crash recovery, price

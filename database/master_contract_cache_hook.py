@@ -125,6 +125,16 @@ def hook_into_master_contract_download(broker: str):
         except Exception as recorder_error:
             logger.exception(f"Error starting the chain recorder: {recorder_error}")
 
+        # Streamed ticks into ClickHouse. Off unless CLICKHOUSE_URL is set.
+        try:
+            from services.marketdata_store.tick_recorder import (
+                start_tick_recorder_if_proxy_in_process,
+            )
+
+            start_tick_recorder_if_proxy_in_process()
+        except Exception as tick_error:
+            logger.exception(f"Error starting the ClickHouse tick recorder: {tick_error}")
+
     except Exception as e:
         logger.exception(f"Error in master contract cache hook: {e}")
 

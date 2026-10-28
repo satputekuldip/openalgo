@@ -639,6 +639,30 @@ def clear_watchlist() -> tuple[bool, str]:
 # =============================================================================
 
 
+def _mirror_to_clickhouse(df: pd.DataFrame) -> None:
+    """Copy committed bars to ClickHouse when it is configured. Never fails the upsert.
+
+    DuckDB stays Historify's own store; this only buffers the rows for the
+    background writer (services/marketdata_store), so it costs no network time.
+    """
+    try:
+        from services.marketdata_store.clickhouse import clickhouse_enabled
+
+        if not clickhouse_enabled():
+            return
+        import time
+
+        from services.marketdata_store.writer import write
+
+        version = time.time_ns() // 1_000_000
+        rows = df.to_dict(orient="records")
+        for row in rows:
+            row["version"] = version
+        write("ohlcv", rows)
+    except Exception as e:
+        logger.exception(f"Could not queue bars for ClickHouse: {e}")
+
+
 @_serialized_write
 @_retry_duckdb_conflict
 def upsert_market_data(df: pd.DataFrame, symbol: str, exchange: str, interval: str) -> int:
@@ -772,6 +796,7 @@ def upsert_market_data(df: pd.DataFrame, symbol: str, exchange: str, interval: s
                 raise
 
         logger.info(f"Upserted {len(df)} records for {symbol}:{exchange}:{interval}")
+        _mirror_to_clickhouse(df)
         return len(df)
 
     except Exception as e:

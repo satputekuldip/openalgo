@@ -151,6 +151,19 @@ def _stop_chain_recorder() -> None:
         module.stop_chain_recorder()
 
 
+def _stop_clickhouse_writer() -> None:
+    """Stop recording ticks, then send what the ClickHouse writer still holds.
+
+    After the chain recorder, whose last snapshot lands in the same buffer.
+    """
+    ticks = _imported("services.marketdata_store.tick_recorder")
+    if ticks is not None:
+        ticks.stop_tick_recorder()
+    writer = _imported("services.marketdata_store.writer")
+    if writer is not None:
+        writer.stop_writer()
+
+
 def _stop_flow_scheduler() -> None:
     """Stop the Flow workflow scheduler."""
     module = _imported("services.flow_scheduler_service")
@@ -448,6 +461,7 @@ def shutdown_runtime() -> None:
         _stop_historify_scheduler,
         _stop_historify_downloads,
         _stop_chain_recorder,
+        _stop_clickhouse_writer,
         _stop_chartink_scheduler,
         _stop_python_strategy_scheduler,
         _stop_squareoff_scheduler,
